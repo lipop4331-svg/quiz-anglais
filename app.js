@@ -2,12 +2,34 @@ const app = document.getElementById("app");
 const SESSION_SIZE = 10;
 const KEY = "quiz-anglais-v1";
 
-// ---- Sauvegarde : pour chaque question, boite (0 = a retravailler ... 3 = acquise) et nombre d'erreurs
-let progress = {};
+// ---- Sauvegarde : pour chaque question, boite (0 = a retravailler ... 4 = acquise), erreurs et date de prochaine revision
+const INTERVALS = [0, 1, 3, 7, 30]; // jours avant de revoir la question, selon la boite
+const DAILY_GOAL = 10;
+const DKEY = "quiz-anglais-daily-v1";
+const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 864e5);
+let progress = {}, daily = {};
 try { progress = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { progress = {}; }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(progress)); } catch (e) {} }
+try { daily = JSON.parse(localStorage.getItem(DKEY)) || {}; } catch (e) { daily = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(progress)); localStorage.setItem(DKEY, JSON.stringify(daily)); } catch (e) {} }
 const id = (q) => q.c + "|" + q.q;
-const st = (q) => progress[id(q)] || { box: null, wrong: 0 };
+const st = (q) => ({ box: null, wrong: 0, due: 0, ...progress[id(q)] });
+// Serie : jours d'affilee ou l'objectif du jour est atteint (aujourd'hui compte s'il est deja atteint)
+function streak() {
+  let d = today(), n = 0;
+  if ((daily[d] || 0) < DAILY_GOAL) d--;
+  while ((daily[d] || 0) >= DAILY_GOAL) { n++; d--; }
+  return n;
+}
+// Enregistre une reponse : une bonne reponse espace la prochaine revision, une erreur la ramene a aujourd'hui
+function grade(q, good) {
+  const s = st(q), t = today();
+  if (good) { if (s.box === null || s.due <= t) s.box = Math.min(4, s.box === null ? 1 : s.box + 1); }
+  else { s.box = 0; s.wrong++; }
+  s.due = t + INTERVALS[s.box];
+  progress[id(q)] = s;
+  daily[t] = (daily[t] || 0) + 1;
+  save();
+}
 
 const categories = [...new Set(QUESTIONS.map((q) => q.c))];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -17,7 +39,7 @@ const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) {
 function weight(q) {
   const s = st(q);
   if (s.box === null) return 3;
-  return [8, 4, 1.5, 0.4][s.box];
+  return [8, 4, 1.5, 0.5, 0.2][s.box] * (s.due > today() ? 0.4 : 1);
 }
 function pick(pool, n) {
   const left = pool.slice(), out = [];
@@ -41,19 +63,32 @@ const enc = (o) => { const b = new TextEncoder().encode(JSON.stringify(o)); let 
 const dec = (t) => { const s = atob(t.replace(/-/g, "+").replace(/_/g, "/")); return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, (c) => c.charCodeAt(0)))); };
 const validQuiz = (z) => z && typeof z.name === "string" && Array.isArray(z.questions) && z.questions.length > 0 &&
   z.questions.every((q) => typeof q.q === "string" && Array.isArray(q.o) && q.o.length >= 2 && q.o.every((t) => typeof t === "string") && Number.isInteger(q.a) && q.a >= 0 && q.a < q.o.length);
-const mastered = (list) => list.filter((q) => st(q).box === 3).length;
+const mastered = (list) => list.filter((q) => st(q).box >= 3).length;
+const cardsPool = VOCAB;
+const allPool = () => QUESTIONS.concat(cardsPool, ...custom.map(toPool));
+const duePool = () => allPool().filter((q) => st(q).box !== null && st(q).due <= today());
 
 // ---- Ecrans
 let session = null;
 
 function home() {
-  const m = mistakes().length;
+  const m = mistakes().length, due = duePool().length;
   const total = QUESTIONS.length;
+  const done = daily[today()] || 0, sk = streak();
   app.innerHTML = `
     <h1>English Quiz</h1>
-    <p class="sub">${total} questions. Celles que tu rates reviennent plus souvent jusqu'a ce que tu les reussisses.</p>
-    <div class="card stack" style="margin-top:16px">
-      <button class="btn" data-mode="mix">Quiz melange (${SESSION_SIZE} questions)</button>
+    <div class="card" style="margin-top:12px">
+      <div class="row" style="align-items:center">
+        <div><b>Aujourd'hui : ${Math.min(done, DAILY_GOAL)} / ${DAILY_GOAL}</b>
+          <small class="sub" style="display:block">${done >= DAILY_GOAL ? "Objectif atteint, bravo !" : "Objectif du jour : " + DAILY_GOAL + " questions"}</small></div>
+        <div class="center"><div class="streak">${sk}</div><small class="sub">jour${sk > 1 ? "s" : ""} d'affilee</small></div>
+      </div>
+      <div class="bar"><i style="width:${Math.min(100, (done / DAILY_GOAL) * 100)}%"></i></div>
+    </div>
+    <div class="card stack" style="margin-top:14px">
+      <button class="btn" data-mode="due" ${due ? "" : "disabled"}>${due ? "A revoir aujourd'hui (" + due + ")" : "Rien a revoir aujourd'hui"}</button>
+      <button class="btn ${due ? "ghost" : ""}" data-mode="mix">Quiz melange (${SESSION_SIZE} questions)</button>
+      <button class="btn ghost" data-mode="cards">Cartes de vocabulaire</button>
       <button class="btn ghost" data-mode="err" ${m ? "" : "disabled"}>Revoir mes erreurs (${m})</button>
       <div class="bar"><i style="width:${(mastered(QUESTIONS) / total) * 100}%"></i></div>
       <small class="sub">${mastered(QUESTIONS)} questions acquises sur ${total}</small>
@@ -80,6 +115,8 @@ function home() {
       <button class="btn ghost" id="new">Creer un quiz</button>
     </div>
     <div class="center"><button class="link" id="reset">Effacer ma progression</button></div>`;
+  app.querySelector('[data-mode="due"]').onclick = () => start(duePool());
+  app.querySelector('[data-mode="cards"]').onclick = () => start(cardsPool);
   app.querySelector('[data-mode="mix"]').onclick = () => start(QUESTIONS);
   app.querySelector('[data-mode="err"]').onclick = () => start(mistakes());
   app.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => fiche(b.dataset.cat)));
@@ -91,7 +128,7 @@ function home() {
     const z = custom[+b.dataset.del];
     if (confirm('Supprimer le quiz "' + z.name + '" ?')) { custom.splice(+b.dataset.del, 1); saveCustom(); home(); }
   }));
-  app.querySelector("#reset").onclick =() => { if (confirm("Effacer toute ta progression ?")) { progress = {}; save(); home(); } };
+  app.querySelector("#reset").onclick =() => { if (confirm("Effacer toute ta progression ?")) { progress = {}; daily = {}; save(); home(); } };
 }
 
 // Fiche de cours d'un theme : a lire avant de s'entrainer
@@ -117,38 +154,90 @@ function start(pool) {
   question();
 }
 
+// Reponse attendue, quel que soit le type de question (carte, a ecrire, choix multiple)
+const ans = (q) => q.en || (q.t ? q.t[0] : q.o[q.a]);
+const norm = (s) => s.toLowerCase().replace(/[’`]/g, "'").replace(/[.!?]+$/, "").replace(/\s+/g, " ").trim();
+const fbBox = (good, extra, e) => `<div class="fb ${good ? "ok" : "bad"}"><b>${good ? "Bravo !" : "Pas tout a fait."}</b>${esc(extra)}${esc(e || "")}</div>`;
+
 function question() {
   const q = session.qs[session.i];
+  const head = `<div class="top"><button id="quit">Quitter</button><span>${session.i + 1} / ${session.qs.length}</span></div>`;
+  if (q.en) drawCard(q, head);
+  else if (q.t) drawTyped(q, head);
+  else drawChoice(q, head);
+  app.querySelector("#quit").onclick = home;
+}
+
+function record(q, good) {
+  grade(q, good);
+  if (good) session.score++; else session.wrong.push(q);
+}
+function goNext() { session.i++; session.i >= session.qs.length ? result() : question(); }
+
+// Affiche le retour puis le bouton pour continuer
+function finish(q, good, html) {
+  record(q, good);
+  const last = session.i === session.qs.length - 1;
+  app.querySelector("#fb").innerHTML = html + `<button class="btn" style="margin-top:14px" id="next">${last ? "Voir mon resultat" : "Suivante"}</button>`;
+  app.querySelector("#next").onclick = goNext;
+}
+
+function drawChoice(q, head) {
   const opts = shuffle(q.o.map((t, k) => ({ t, ok: k === q.a })));
-  app.innerHTML = `
-    <div class="top"><button id="quit">Quitter</button><span>${session.i + 1} / ${session.qs.length}</span></div>
+  app.innerHTML = `${head}
     <div class="card">
       <span class="tag">${esc(q.c)}</span>
       <p class="q">${esc(q.q)}</p>
       <div class="stack">${opts.map((o, k) => `<button class="opt" data-k="${k}">${esc(o.t)}</button>`).join("")}</div>
       <div id="fb"></div>
     </div>`;
-  app.querySelector("#quit").onclick = home;
-  app.querySelectorAll(".opt").forEach((b) => (b.onclick = () => answer(q, opts, +b.dataset.k)));
+  app.querySelectorAll(".opt").forEach((b) => (b.onclick = () => {
+    const k = +b.dataset.k, good = opts[k].ok;
+    app.querySelectorAll(".opt").forEach((o, j) => {
+      o.disabled = true;
+      if (opts[j].ok) o.classList.add("ok"); else if (j === k) o.classList.add("bad");
+    });
+    finish(q, good, fbBox(good, good ? "" : "La bonne reponse : " + q.o[q.a] + ". ", q.e));
+  }));
 }
 
-function answer(q, opts, k) {
-  const good = opts[k].ok;
-  const s = st(q);
-  if (good) { session.score++; s.box = Math.min(3, (s.box === null ? 1 : s.box + 1)); }
-  else { s.box = 0; s.wrong++; session.wrong.push(q); }
-  progress[id(q)] = s; save();
+// Question a ecrire : retrouver la reponse de tete marque bien mieux que la reconnaitre
+function drawTyped(q, head) {
+  app.innerHTML = `${head}
+    <div class="card">
+      <span class="tag">${esc(q.c)} - a ecrire</span>
+      <p class="q">${esc(q.q)}</p>
+      <form id="f" autocomplete="off">
+        <input class="in" id="ans" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Ta reponse">
+        <div class="row"><button type="button" class="btn ghost" id="idk">Je ne sais pas</button><button class="btn" id="ok">Valider</button></div>
+      </form>
+      <div id="fb"></div>
+    </div>`;
+  const inp = app.querySelector("#ans");
+  inp.focus();
+  const done = (good) => {
+    inp.disabled = true;
+    app.querySelector(".row").remove();
+    finish(q, good, fbBox(good, good ? "" : "La bonne reponse : " + q.t[0] + ". ", q.e));
+  };
+  app.querySelector("#f").onsubmit = (ev) => { ev.preventDefault(); if (inp.value.trim()) done(q.t.some((a) => norm(a) === norm(inp.value))); };
+  app.querySelector("#idk").onclick = () => done(false);
+}
 
-  app.querySelectorAll(".opt").forEach((b, j) => {
-    b.disabled = true;
-    if (opts[j].ok) b.classList.add("ok");
-    else if (j === k) b.classList.add("bad");
-  });
-  const last = session.i === session.qs.length - 1;
-  app.querySelector("#fb").innerHTML = `
-    <div class="fb ${good ? "ok" : "bad"}"><b>${good ? "Bravo !" : "Pas tout a fait."}</b>${good ? "" : "La bonne reponse : " + esc(q.o[q.a]) + ". "}${esc(q.e)}</div>
-    <button class="btn" style="margin-top:14px" id="next">${last ? "Voir mon resultat" : "Question suivante"}</button>`;
-  app.querySelector("#next").onclick = () => { session.i++; last ? result() : question(); };
+// Carte de vocabulaire : on se souvient, puis on verifie et on s'auto-evalue
+function drawCard(q, head) {
+  app.innerHTML = `${head}
+    <div class="card center">
+      <span class="tag">Vocabulaire</span>
+      <p class="q" style="margin:18px 0">${esc(q.q)}</p>
+      <div id="fb"><button class="btn" id="flip">Voir la traduction</button></div>
+    </div>`;
+  app.querySelector("#flip").onclick = () => {
+    app.querySelector("#fb").innerHTML = `<p class="q" style="color:var(--accent)">${esc(q.en)}</p>
+      <div class="row"><button class="btn ghost" id="no">Je ne savais pas</button><button class="btn" id="yes">Je savais</button></div>`;
+    app.querySelector("#no").onclick = () => { record(q, false); goNext(); };
+    app.querySelector("#yes").onclick = () => { record(q, true); goNext(); };
+  };
 }
 
 function result() {
@@ -158,7 +247,7 @@ function result() {
     <div class="card center">
       <div class="score">${sc} / ${n}</div>
       <p>${msg}</p>
-      ${session.wrong.length ? `<h2>A retenir</h2><ul class="list">${session.wrong.map((q) => `<li>${esc(q.q)}<small><b>${esc(q.o[q.a])}</b> - ${esc(q.e)}</small></li>`).join("")}</ul>` : ""}
+      ${session.wrong.length ? `<h2>A retenir</h2><ul class="list">${session.wrong.map((q) => `<li>${esc(q.q)}<small><b>${esc(ans(q))}</b>${q.e ? " - " + esc(q.e) : ""}</small></li>`).join("")}</ul>` : ""}
     </div>
     <div class="row" style="margin-top:14px">
       <button class="btn ghost" id="home">Accueil</button>
