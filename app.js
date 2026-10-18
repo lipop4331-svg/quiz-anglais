@@ -359,7 +359,39 @@ const b64u = (bytes) => { let s = ""; bytes.forEach((x) => (s += String.fromChar
 const unb64u = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
 async function viaStream(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
 
-async function shareUrl(quiz) {
+// Lien court : le quiz est range dans une petite table en ligne, le lien ne contient que le code
+const SB_URL = "https://pdnjrtprfkixanfmjyky.supabase.co";
+const SB_KEY = "sb_publishable_0luFoN6Ssd_eIe9mM1Diqg_DXnqqqlo"; // cle publique, faite pour etre dans le navigateur
+const sbHeaders = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
+const siteBase = () => (location.protocol.startsWith("http") ? location.href.split("#")[0] : SITE_URL);
+const newCode = () => { const a = "abcdefghjkmnpqrstuvwxyz23456789"; let s = ""; for (let i = 0; i < 7; i++) s += a[Math.floor(Math.random() * a.length)]; return s; };
+async function shortUrl(quiz) {
+  try {
+    const data = pack(quiz), sig = JSON.stringify(data);
+    let known = {};
+    try { known = JSON.parse(localStorage.getItem("quiz-anglais-codes-v1")) || {}; } catch (e) {}
+    if (known[quiz.id] && known[quiz.id].sig === sig) return siteBase() + "#c=" + known[quiz.id].code; // meme quiz deja envoye : meme lien
+    for (let t = 0; t < 3; t++) {
+      const code = newCode();
+      const r = await fetch(SB_URL + "/rest/v1/quiz_shares", { method: "POST", headers: { ...sbHeaders, Prefer: "return=minimal" }, body: JSON.stringify({ code, data }) });
+      if (r.ok) {
+        known[quiz.id] = { code, sig };
+        try { localStorage.setItem("quiz-anglais-codes-v1", JSON.stringify(known)); } catch (e) {}
+        return siteBase() + "#c=" + code;
+      }
+      if (r.status !== 409) return null; // 409 = code deja pris, on en retire un autre
+    }
+  } catch (e) {}
+  return null;
+}
+async function fetchShared(code) {
+  const r = await fetch(SB_URL + "/rest/v1/quiz_shares?select=data&code=eq." + encodeURIComponent(code), { headers: sbHeaders });
+  const rows = await r.json();
+  if (!r.ok || !rows.length) throw new Error("introuvable");
+  return rows[0].data;
+}
+
+async function longUrl(quiz) {
   const base = location.protocol.startsWith("http") ? location.href.split("#")[0] : SITE_URL; // un lien vers un fichier local ne marcherait pas pour les autres
   const bytes = new TextEncoder().encode(JSON.stringify(pack(quiz)));
   if (typeof CompressionStream === "function") {
@@ -368,8 +400,9 @@ async function shareUrl(quiz) {
   return base + "#q=" + b64u(bytes);
 }
 async function readHash(hash) {
-  const m = hash.match(/^#(z|q|quiz)=(.+)$/);
+  const m = hash.match(/^#(c|z|q|quiz)=(.+)$/);
   if (!m) return null;
+  if (m[1] === "c") return unpack(await fetchShared(m[2]));
   if (m[1] === "quiz") return dec(m[2]); // anciens liens
   const bytes = unb64u(m[2]);
   const raw = m[1] === "z" ? await viaStream(bytes, new DecompressionStream("deflate-raw")) : bytes;
@@ -377,12 +410,15 @@ async function readHash(hash) {
 }
 
 async function share(quiz) {
-  const url = await shareUrl(quiz);
+  app.innerHTML = `<p class="sub center" style="margin-top:40px">Creation du lien...</p>`;
+  const short = await shortUrl(quiz);
+  const url = short || (await longUrl(quiz));
   app.innerHTML = `
     <div class="top"><button id="back">Retour</button><span>Partager</span></div>
     <div class="card">
       <b>${esc(quiz.name)}</b>
       <p class="sub">Envoie ce lien. Quand ta soeur l'ouvre, le quiz s'ajoute a sa liste.</p>
+      <p class="sub">${short ? "Lien court : il passe partout, Instagram compris." : "Le lien court n'est pas disponible pour le moment, voici le lien long."}</p>
       <textarea class="in" id="link" readonly rows="4">${esc(url)}</textarea>
       <small class="sub">${url.length} caracteres${url.length > 1900 ? " - trop long pour Discord (limite 2000), utilise plutot le fichier ci-dessous." : ""}</small>
       <div class="stack" style="margin-top:12px">
@@ -442,7 +478,8 @@ function badQuiz(clean) {
 }
 
 async function importFromLink() {
-  if (!/^#(z|q|quiz)=/.test(location.hash)) return false;
+  if (!/^#(c|z|q|quiz)=/.test(location.hash)) return false;
+  app.innerHTML = `<p class="sub center" style="margin-top:40px">Chargement du quiz...</p>`;
   const clean = () => history.replaceState(null, "", location.pathname + location.search);
   let z = null;
   try { z = await readHash(location.hash); if (!validQuiz(z)) z = null; } catch (e) { z = null; }
