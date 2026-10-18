@@ -129,3 +129,63 @@ const FICHES = {
   "Vocabulaire": { regle: ["Les faux amis ressemblent au francais mais n'ont pas le meme sens.", "Actually = en fait. Attend = assister. Library = bibliotheque. Sensible = raisonnable. Demand = exiger. Eventually = finalement."], astuce: "Fais-toi une liste de tes faux amis et relis-la une fois par semaine. Invente une phrase drole pour chacun, on retient mieux ce qui fait rire." },
   "Phrases": { regle: ["Adverbes de frequence (always, never) : apres be, avant les autres verbes.", "L'age : I am 15 (pas I have).", "Meteo : it is cold.", "There is + singulier, there are + pluriel.", "Its (son) / it's (it is). Their / there / they're."], astuce: "Lis ta phrase a voix haute. Remplace it's par 'it is' et they're par 'they are' : si la phrase marche, c'est la bonne forme." }
 };
+
+// ---- Questions a ECRIRE (t = reponses acceptees)
+const T = (c, q, t, e) => QUESTIONS.push({ c, q, t, e });
+T("Present", "She ___ (go) to school every day. Ecris le verbe.", ["goes"], "He/she/it + verbe + -s. Go prend -es : goes.");
+T("Present", "He ___ (watch) TV every night. Ecris le verbe.", ["watches"], "Les verbes en -ch prennent -es a la 3e personne : watches.");
+T("Present", "They ___ football now. (play, present continu - ecris 2 mots)", ["are playing"], "Present continu : be + verbe-ing. They + are : are playing.");
+T("Passe", "Yesterday I ___ (see) a good film.", ["saw"], "See - saw - seen.");
+T("Passe", "She ___ (not go) to school yesterday. Ecris les 2 mots.", ["didn't go", "did not go"], "Negation au passe simple : didn't + verbe a la base.");
+T("Passe", "Last year we ___ (be) in Spain.", ["were"], "Passe de be : we were.");
+T("Present perfect", "I have never ___ (eat) sushi.", ["eaten"], "Eat - ate - eaten.");
+T("Present perfect", "We have lived here ___ 2019. (for ou since)", ["since"], "Since + point de depart.");
+T("Present perfect", "She has lived here ___ five years. (for ou since)", ["for"], "For + duree.");
+T("Comparatifs", "big - ___ - the biggest", ["bigger"], "Big double sa consonne : bigger.");
+T("Comparatifs", "good - ___ - the best", ["better"], "Good - better - best.");
+T("Comparatifs", "interesting - more interesting - the ___ interesting (1 mot)", ["most"], "Adjectif long : more / the most.");
+T("Prepositions", "I'm good ___ maths. (1 mot)", ["at"], "Be good at.");
+T("Prepositions", "My birthday is ___ June. (1 mot)", ["in"], "In + mois.");
+T("Prepositions", "See you ___ Monday! (1 mot)", ["on"], "On + jour.");
+T("Prepositions", "She is afraid ___ dogs. (1 mot)", ["of"], "Be afraid of.");
+T("Modaux", "Tu dois porter un uniforme ici. You ___ wear a uniform. (1 mot)", ["must"], "Must = obligation forte.");
+T("Modaux", "Tu devrais dormir plus. You ___ sleep more. (1 mot)", ["should"], "Should = conseil.");
+T("Phrases", "Traduis : Il fait froid.", ["it is cold", "it's cold", "it is cold."], "La meteo se dit avec it is.");
+T("Phrases", "Traduis : J'ai 15 ans.", ["i am 15", "i'm 15", "i am 15 years old", "i'm 15 years old"], "En anglais on dit I am 15 (etre).");
+T("Vocabulaire", "Comment dit-on 'bibliotheque' en anglais ?", ["library"], "Library = bibliotheque. Librairie = bookshop.");
+T("Vocabulaire", "Comment dit-on 'en fait' en anglais ?", ["actually"], "Actually = en fait.");
+T("Vocabulaire", "Comment dit-on 'assister a (un cours)' en anglais ? (1 mot)", ["attend"], "Attend = assister a. Attendre = wait.");
+
+// Verbes irreguliers : [base, francais, passe simple, participe passe]
+[
+  ["go", "aller", "went", "gone"], ["see", "voir", "saw", "seen"], ["eat", "manger", "ate", "eaten"], ["take", "prendre", "took", "taken"],
+  ["give", "donner", "gave", "given"], ["write", "ecrire", "wrote", "written"], ["speak", "parler", "spoke", "spoken"],
+  ["drink", "boire", "drank", "drunk"], ["begin", "commencer", "began", "begun"], ["break", "casser", "broke", "broken"],
+  ["forget", "oublier", "forgot", "forgotten"], ["know", "savoir", "knew", "known"], ["come", "venir", "came", "come"], ["do", "faire", "did", "done"],
+  ["buy", "acheter", "bought", "bought"], ["bring", "apporter", "brought", "brought"], ["think", "penser", "thought", "thought"],
+  ["teach", "enseigner", "taught", "taught"], ["catch", "attraper", "caught", "caught"], ["find", "trouver", "found", "found"],
+  ["get", "obtenir", "got", "got"], ["have", "avoir", "had", "had"], ["make", "faire / fabriquer", "made", "made"], ["say", "dire", "said", "said"],
+  ["tell", "raconter", "told", "told"], ["leave", "partir", "left", "left"], ["meet", "rencontrer", "met", "met"], ["lose", "perdre", "lost", "lost"],
+  ["pay", "payer", "paid", "paid"], ["sell", "vendre", "sold", "sold"]
+].forEach(([b, fr, p, pp]) => {
+  const e = b + " - " + p + " - " + pp;
+  if (p === pp) T("Verbes irreguliers", "Passe simple ET participe passe de " + b + " (" + fr + ") :", [p], e + " (les deux formes sont identiques)");
+  else {
+    T("Verbes irreguliers", "Passe simple de " + b + " (" + fr + ") :", [p], e);
+    T("Verbes irreguliers", "Participe passe de " + b + " (" + fr + ") :", [pp], e);
+  }
+});
+
+// ---- Cartes de vocabulaire (francais -> anglais)
+const VOCAB = [
+  ["se souvenir de", "remember"], ["oublier", "forget"], ["emprunter", "borrow"], ["preter", "lend"], ["gagner (un match)", "win"], ["gagner (de l'argent)", "earn"],
+  ["perdre", "lose"], ["reussir (un examen)", "pass"], ["echouer", "fail"], ["se reveiller", "wake up"], ["se lever", "get up"], ["s'habiller", "get dressed"],
+  ["chercher", "look for"], ["rire", "laugh"], ["pleurer", "cry"], ["se depecher", "hurry up"], ["s'ennuyer", "be bored"], ["apprendre", "learn"], ["enseigner", "teach"],
+  ["fatigue", "tired"], ["en colere", "angry"], ["inquiet", "worried"], ["fier", "proud"], ["timide", "shy"], ["drole", "funny"], ["paresseux", "lazy"],
+  ["gentil", "kind"], ["bruyant", "noisy"], ["dangereux", "dangerous"], ["bon marche", "cheap"], ["cher", "expensive"], ["plein", "full"], ["vide", "empty"],
+  ["propre", "clean"], ["sale", "dirty"], ["un devoir (a la maison)", "homework"], ["un controle", "test"], ["un cartable", "schoolbag"], ["une trousse", "pencil case"],
+  ["une note", "mark"], ["toujours", "always"], ["jamais", "never"], ["souvent", "often"], ["parfois", "sometimes"], ["deja", "already"], ["pas encore", "yet"],
+  ["tard", "late"], ["tot", "early"], ["demain", "tomorrow"], ["hier", "yesterday"], ["mais", "but"], ["parce que", "because"], ["donc", "so"],
+  ["cependant", "however"], ["aussi", "also"], ["pendant", "during"], ["avant", "before"], ["apres", "after"], ["quand", "when"], ["meme si", "although"],
+  ["un oncle", "uncle"], ["une tante", "aunt"], ["un neveu", "nephew"], ["une niece", "niece"], ["un grand-pere", "grandfather"], ["un voisin", "neighbour"]
+].map(([fr, en]) => ({ c: "Carte vocabulaire", q: fr, en }));
