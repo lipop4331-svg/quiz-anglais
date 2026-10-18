@@ -29,7 +29,18 @@ function pick(pool, n) {
   }
   return out;
 }
-const mistakes = () => QUESTIONS.filter((q) => st(q).wrong > 0 && st(q).box < 3);
+const mistakes = (pool = QUESTIONS) => pool.filter((q) => st(q).wrong > 0 && st(q).box < 3);
+
+// ---- Quiz crees par l'utilisateur
+const CKEY = "quiz-anglais-custom-v1";
+let custom = [];
+try { custom = JSON.parse(localStorage.getItem(CKEY)) || []; } catch (e) { custom = []; }
+function saveCustom() { try { localStorage.setItem(CKEY, JSON.stringify(custom)); } catch (e) {} }
+const toPool = (quiz) => quiz.questions.map((q) => ({ ...q, c: quiz.name }));
+const enc = (o) => { const b = new TextEncoder().encode(JSON.stringify(o)); let s = ""; b.forEach((x) => (s += String.fromCharCode(x))); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const dec = (t) => { const s = atob(t.replace(/-/g, "+").replace(/_/g, "/")); return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, (c) => c.charCodeAt(0)))); };
+const validQuiz = (z) => z && typeof z.name === "string" && Array.isArray(z.questions) && z.questions.length > 0 &&
+  z.questions.every((q) => typeof q.q === "string" && Array.isArray(q.o) && q.o.length >= 2 && q.o.every((t) => typeof t === "string") && Number.isInteger(q.a) && q.a >= 0 && q.a < q.o.length);
 const mastered = (list) => list.filter((q) => st(q).box === 3).length;
 
 // ---- Ecrans
@@ -55,11 +66,32 @@ function home() {
           <div class="bar"><i style="width:${(mastered(l) / l.length) * 100}%"></i></div></button>`;
       }).join("")}
     </div>
+    <h2>Mes quiz</h2>
+    <div class="stack">
+      ${custom.length ? "" : `<p class="sub">Tu n'as pas encore de quiz. Cree le tien avec tes propres questions.</p>`}
+      ${custom.map((z, i) => `<div class="card">
+        <b>${esc(z.name)}</b> <small class="sub">${z.questions.length} questions</small>
+        <div class="row" style="margin-top:10px">
+          <button class="mini main" data-play="${i}">Jouer</button>
+          <button class="mini" data-edit="${i}">Modifier</button>
+          <button class="mini" data-share="${i}">Partager</button>
+          <button class="mini" data-del="${i}">Supprimer</button>
+        </div></div>`).join("")}
+      <button class="btn ghost" id="new">Creer un quiz</button>
+    </div>
     <div class="center"><button class="link" id="reset">Effacer ma progression</button></div>`;
   app.querySelector('[data-mode="mix"]').onclick = () => start(QUESTIONS);
   app.querySelector('[data-mode="err"]').onclick = () => start(mistakes());
   app.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => fiche(b.dataset.cat)));
-  app.querySelector("#reset").onclick = () => { if (confirm("Effacer toute ta progression ?")) { progress = {}; save(); home(); } };
+  app.querySelector("#new").onclick = () => editor(null);
+  app.querySelectorAll("[data-play]").forEach((b) => (b.onclick = () => start(toPool(custom[+b.dataset.play]))));
+  app.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => editor(custom[+b.dataset.edit])));
+  app.querySelectorAll("[data-share]").forEach((b) => (b.onclick = () => share(custom[+b.dataset.share])));
+  app.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => {
+    const z = custom[+b.dataset.del];
+    if (confirm('Supprimer le quiz "' + z.name + '" ?')) { custom.splice(+b.dataset.del, 1); saveCustom(); home(); }
+  }));
+  app.querySelector("#reset").onclick =() => { if (confirm("Effacer toute ta progression ?")) { progress = {}; save(); home(); } };
 }
 
 // Fiche de cours d'un theme : a lire avant de s'entrainer
@@ -81,7 +113,7 @@ function fiche(cat) {
 function start(pool) {
   const qs = pick(pool, SESSION_SIZE);
   if (!qs.length) return home();
-  session = { qs, i: 0, score: 0, wrong: [] };
+  session = { qs, i: 0, score: 0, wrong: [], pool };
   question();
 }
 
@@ -133,7 +165,101 @@ function result() {
       <button class="btn" id="again">${session.wrong.length ? "Retravailler mes erreurs" : "Rejouer"}</button>
     </div>`;
   app.querySelector("#home").onclick = home;
-  app.querySelector("#again").onclick = () => start(session.wrong.length ? mistakes() : QUESTIONS);
+  app.querySelector("#again").onclick = () => start(session.wrong.length ? mistakes(session.pool) : session.pool);
 }
 
+// ---- Editeur de quiz
+let draft = null;
+const blankQ = () => ({ q: "", o: ["", "", "", ""], a: 0, e: "" });
+
+function editor(quiz) {
+  draft = quiz ? JSON.parse(JSON.stringify(quiz)) : { id: Date.now().toString(36), name: "", questions: [blankQ()] };
+  // on garde toujours 4 cases pour l'edition
+  draft.questions.forEach((q) => { while (q.o.length < 4) q.o.push(""); });
+  drawEditor();
+}
+
+function drawEditor() {
+  app.innerHTML = `
+    <div class="top"><button id="cancel">Annuler</button><span>${draft.questions.length} question(s)</span></div>
+    <label class="lbl">Nom du quiz</label>
+    <input class="in" id="name" placeholder="Ex : Vocabulaire unit 3" value="${esc(draft.name).replace(/"/g, "&quot;")}">
+    ${draft.questions.map((q, i) => `
+      <div class="card" style="margin-top:14px">
+        <div class="top"><b>Question ${i + 1}</b>${draft.questions.length > 1 ? `<button data-rm="${i}">Retirer</button>` : ""}</div>
+        <input class="in" data-i="${i}" data-f="q" placeholder="La question" value="${esc(q.q).replace(/"/g, "&quot;")}">
+        <label class="lbl">Reponses (coche la bonne)</label>
+        ${q.o.map((t, k) => `<div class="optrow">
+          <input type="radio" name="a${i}" data-i="${i}" data-f="a" value="${k}" ${q.a === k ? "checked" : ""}>
+          <input class="in" data-i="${i}" data-f="o${k}" placeholder="Reponse ${k + 1}${k > 1 ? " (facultatif)" : ""}" value="${esc(t).replace(/"/g, "&quot;")}">
+        </div>`).join("")}
+        <label class="lbl">Explication (facultatif)</label>
+        <input class="in" data-i="${i}" data-f="e" placeholder="Pourquoi c'est la bonne reponse" value="${esc(q.e).replace(/"/g, "&quot;")}">
+      </div>`).join("")}
+    <div class="stack" style="margin-top:14px">
+      <button class="btn ghost" id="add">Ajouter une question</button>
+      <button class="btn" id="save">Enregistrer le quiz</button>
+    </div>`;
+  app.querySelector("#cancel").onclick = home;
+  app.querySelector("#name").oninput = (e) => (draft.name = e.target.value);
+  app.querySelectorAll("[data-f]").forEach((el) => {
+    el.oninput = el.onchange = () => {
+      const q = draft.questions[+el.dataset.i], f = el.dataset.f;
+      if (f === "a") q.a = +el.value;
+      else if (f === "q" || f === "e") q[f] = el.value;
+      else q.o[+f.slice(1)] = el.value;
+    };
+  });
+  app.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { draft.questions.splice(+b.dataset.rm, 1); drawEditor(); }));
+  app.querySelector("#add").onclick = () => { draft.questions.push(blankQ()); drawEditor(); window.scrollTo(0, document.body.scrollHeight); };
+  app.querySelector("#save").onclick = saveDraft;
+}
+
+function saveDraft() {
+  const name = draft.name.trim();
+  if (!name) return alert("Donne un nom a ton quiz.");
+  const questions = [];
+  for (let i = 0; i < draft.questions.length; i++) {
+    const d = draft.questions[i];
+    if (!d.q.trim() && d.o.every((t) => !t.trim())) continue; // question vide : ignoree
+    if (!d.q.trim()) return alert("Question " + (i + 1) + " : il manque la question.");
+    const filled = d.o.map((t, k) => ({ t: t.trim(), k })).filter((x) => x.t);
+    if (filled.length < 2) return alert("Question " + (i + 1) + " : mets au moins 2 reponses.");
+    const a = filled.findIndex((x) => x.k === d.a);
+    if (a < 0) return alert("Question " + (i + 1) + " : la reponse cochee est vide.");
+    questions.push({ q: d.q.trim(), o: filled.map((x) => x.t), a, e: d.e.trim() });
+  }
+  if (!questions.length) return alert("Ajoute au moins une question.");
+  const quiz = { id: draft.id, name, questions };
+  const at = custom.findIndex((z) => z.id === quiz.id);
+  if (at >= 0) custom[at] = quiz; else custom.push(quiz);
+  saveCustom();
+  home();
+}
+
+// ---- Partage par lien : le quiz est contenu dans le lien
+function share(quiz) {
+  const url = location.href.split("#")[0] + "#quiz=" + enc({ id: quiz.id, name: quiz.name, questions: quiz.questions });
+  const done = () => alert("Lien copie. Envoie-le : en l'ouvrant, le quiz s'ajoute tout seul.");
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => prompt("Copie ce lien :", url));
+  else prompt("Copie ce lien :", url);
+}
+
+function importFromLink() {
+  const m = location.hash.match(/^#quiz=(.+)$/);
+  if (!m) return;
+  try {
+    const z = dec(m[1]);
+    if (!validQuiz(z)) throw new Error("invalid");
+    if (confirm('Ajouter le quiz "' + z.name + '" (' + z.questions.length + " questions) a ta liste ?")) {
+      z.id = z.id || Date.now().toString(36);
+      const at = custom.findIndex((c) => c.id === z.id);
+      if (at >= 0) custom[at] = z; else custom.push(z);
+      saveCustom();
+    }
+  } catch (e) { alert("Ce lien de quiz n'est pas valide."); }
+  history.replaceState(null, "", location.pathname + location.search);
+}
+
+importFromLink();
 home();
