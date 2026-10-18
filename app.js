@@ -121,6 +121,8 @@ function home() {
           <button class="mini" data-share="${i}">Partager</button>
         </div></div>`).join("")}
       <button class="btn ghost" id="new">Creer un quiz</button>
+      <button class="btn ghost" id="imp">Importer un quiz (fichier)</button>
+      <input type="file" id="file" accept=".json,application/json" hidden>
       ${trash.length ? `<h2>Quiz supprimes</h2>${trash.map((z, i) => `<div class="card row" style="align-items:center">
         <span>${esc(z.name)}</span><button class="mini" data-restore="${i}">Restaurer</button></div>`).join("")}` : ""}
     </div>
@@ -131,6 +133,9 @@ function home() {
   app.querySelector('[data-mode="err"]').onclick = () => start(mistakes());
   app.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => fiche(b.dataset.cat)));
   app.querySelector("#new").onclick = () => editor(null);
+  const fileIn = app.querySelector("#file");
+  app.querySelector("#imp").onclick = () => fileIn.click();
+  fileIn.onchange = () => { if (fileIn.files[0]) importFromFile(fileIn.files[0]); };
   app.querySelectorAll("[data-play]").forEach((b) => (b.onclick = () => start(toPool(custom[+b.dataset.play]))));
   app.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => editor(custom[+b.dataset.edit])));
   app.querySelectorAll("[data-share]").forEach((b) => (b.onclick = () => share(custom[+b.dataset.share])));
@@ -346,23 +351,47 @@ function saveDraft() {
   home();
 }
 
-// ---- Partage par lien : le quiz est contenu dans le lien
+// ---- Partage : le quiz est compresse dans le lien (ou envoye en fichier, sans limite de taille)
 const SITE_URL = "https://lipop4331-svg.github.io/quiz-anglais/";
-function share(quiz) {
+const pack = (z) => [z.id, z.name, z.questions.map((q) => [q.q, q.o, q.a, q.e || ""])];
+const unpack = (p) => ({ id: p[0], name: p[1], questions: p[2].map((x) => ({ q: x[0], o: x[1], a: x[2], e: x[3] })) });
+const b64u = (bytes) => { let s = ""; bytes.forEach((x) => (s += String.fromCharCode(x))); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const unb64u = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function viaStream(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
+
+async function shareUrl(quiz) {
   const base = location.protocol.startsWith("http") ? location.href.split("#")[0] : SITE_URL; // un lien vers un fichier local ne marcherait pas pour les autres
-  const url = base + "#quiz=" + enc({ id: quiz.id, name: quiz.name, questions: quiz.questions });
+  const bytes = new TextEncoder().encode(JSON.stringify(pack(quiz)));
+  if (typeof CompressionStream === "function") {
+    try { return base + "#z=" + b64u(await viaStream(bytes, new CompressionStream("deflate-raw"))); } catch (e) {}
+  }
+  return base + "#q=" + b64u(bytes);
+}
+async function readHash(hash) {
+  const m = hash.match(/^#(z|q|quiz)=(.+)$/);
+  if (!m) return null;
+  if (m[1] === "quiz") return dec(m[2]); // anciens liens
+  const bytes = unb64u(m[2]);
+  const raw = m[1] === "z" ? await viaStream(bytes, new DecompressionStream("deflate-raw")) : bytes;
+  return unpack(JSON.parse(new TextDecoder().decode(raw)));
+}
+
+async function share(quiz) {
+  const url = await shareUrl(quiz);
   app.innerHTML = `
     <div class="top"><button id="back">Retour</button><span>Partager</span></div>
     <div class="card">
       <b>${esc(quiz.name)}</b>
       <p class="sub">Envoie ce lien. Quand ta soeur l'ouvre, le quiz s'ajoute a sa liste.</p>
-      <textarea class="in" id="link" readonly rows="5">${esc(url)}</textarea>
-      <div class="stack">
+      <textarea class="in" id="link" readonly rows="4">${esc(url)}</textarea>
+      <small class="sub">${url.length} caracteres${url.length > 1900 ? " - trop long pour Discord (limite 2000), utilise plutot le fichier ci-dessous." : ""}</small>
+      <div class="stack" style="margin-top:12px">
         <button class="btn" id="copy">Copier le lien</button>
         ${navigator.share ? `<button class="btn ghost" id="send">Envoyer...</button>` : ""}
+        <button class="btn ghost" id="file">Telecharger le quiz en fichier</button>
       </div>
       <div id="msg" style="margin-top:12px"></div>
-      ${url.length > 6000 ? `<p class="sub">Ce lien est tres long. Si une application le coupe, partage-le en deux quiz plus courts.</p>` : ""}
+      <p class="sub" style="margin-bottom:0">Le fichier n'a pas de limite de taille : envoie-le a ta soeur, elle l'ouvre avec "Importer un quiz" sur l'accueil.</p>
     </div>`;
   const link = app.querySelector("#link"), msg = app.querySelector("#msg");
   const ok = (t) => (msg.innerHTML = `<div class="fb ok">${t}</div>`);
@@ -378,20 +407,18 @@ function share(quiz) {
   };
   const send = app.querySelector("#send");
   if (send) send.onclick = () => navigator.share({ title: quiz.name, url }).catch(() => {});
+  app.querySelector("#file").onclick = () => {
+    const blob = new Blob([JSON.stringify({ id: quiz.id, name: quiz.name, questions: quiz.questions })], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = quiz.name.replace(/[^\w\-]+/g, "_") + ".quiz.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    ok("Fichier telecharge. Envoie-le a ta soeur.");
+  };
 }
 
-// Quand on ouvre un lien de quiz : ecran avec un bouton, rien ne se perd si le navigateur bloque les fenetres
-function importFromLink() {
-  const m = location.hash.match(/^#quiz=(.+)$/);
-  if (!m) return false;
-  let z = null;
-  try { z = dec(m[1]); if (!validQuiz(z)) z = null; } catch (e) { z = null; }
-  const clean = () => history.replaceState(null, "", location.pathname + location.search);
-  if (!z) {
-    app.innerHTML = `<div class="card center"><p>Ce lien de quiz n'est pas valide ou a ete coupe.</p><button class="btn" id="ok">Aller a l'accueil</button></div>`;
-    app.querySelector("#ok").onclick = () => { clean(); home(); };
-    return true;
-  }
+// Ecran "Quiz recu" : un bouton pour ajouter, rien ne se perd si le navigateur bloque les fenetres
+function offerQuiz(z, clean) {
   app.innerHTML = `
     <div class="card center">
       <span class="tag">Quiz recu</span>
@@ -404,11 +431,33 @@ function importFromLink() {
     z.id = z.id || Date.now().toString(36);
     const at = custom.findIndex((c) => c.id === z.id);
     if (at >= 0) custom[at] = z; else custom.push(z);
-    if (!saveCustom()) return warn("Ce navigateur n'arrive pas a enregistrer le quiz. Ouvre le lien directement dans Chrome ou Safari.");
+    if (!saveCustom()) return warn("Ce navigateur n'arrive pas a enregistrer le quiz. Ouvre le site directement dans Chrome ou Safari.");
     clean();
     home();
   };
+}
+function badQuiz(clean) {
+  app.innerHTML = `<div class="card center"><p>Ce quiz n'est pas valide ou le lien a ete coupe.</p><button class="btn" id="ok">Aller a l'accueil</button></div>`;
+  app.querySelector("#ok").onclick = () => { clean(); home(); };
+}
+
+async function importFromLink() {
+  if (!/^#(z|q|quiz)=/.test(location.hash)) return false;
+  const clean = () => history.replaceState(null, "", location.pathname + location.search);
+  let z = null;
+  try { z = await readHash(location.hash); if (!validQuiz(z)) z = null; } catch (e) { z = null; }
+  if (z) offerQuiz(z, clean); else badQuiz(clean);
   return true;
 }
 
-if (!importFromLink()) home();
+function importFromFile(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    let z = null;
+    try { z = JSON.parse(r.result); if (!validQuiz(z)) z = null; } catch (e) { z = null; }
+    if (z) offerQuiz(z, () => {}); else badQuiz(() => {});
+  };
+  r.readAsText(file);
+}
+
+importFromLink().then((handled) => { if (!handled) home(); });
