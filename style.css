@@ -49,3 +49,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .list li { padding: 10px 0; border-top: 1px solid var(--line); }
 .list small { color: var(--muted); display: block; }
 .link { background: none; border: 0; color: var(--muted); text-decoration: underline; font-size: 14px; margin-top: 24px; }
+.in { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 2px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.in:focus { outline: none; border-color: var(--accent); }
+.lbl { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 6px; }
+.optrow { display: flex; align-items: center; gap: 10px; }
+.optrow .in { flex: 1; }
+.optrow input[type=radio] { width: 20px; height: 20px; margin: 0 0 8px; accent-color: var(--ok); }
+.mini { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px; font-size: 14px; }
+.mini.main { background: var(--accent); color: #fff; border-color: var(--accent); }
