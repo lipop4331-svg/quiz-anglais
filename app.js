@@ -57,7 +57,16 @@ const mistakes = (pool = QUESTIONS) => pool.filter((q) => st(q).wrong > 0 && st(
 const CKEY = "quiz-anglais-custom-v1";
 let custom = [];
 try { custom = JSON.parse(localStorage.getItem(CKEY)) || []; } catch (e) { custom = []; }
-function saveCustom() { try { localStorage.setItem(CKEY, JSON.stringify(custom)); } catch (e) {} }
+// Corbeille : un quiz supprime est garde et peut etre restaure
+const TKEY = "quiz-anglais-trash-v1";
+let trash = [];
+try { trash = JSON.parse(localStorage.getItem(TKEY)) || []; } catch (e) { trash = []; }
+function saveCustom() {
+  try { localStorage.setItem(CKEY, JSON.stringify(custom)); localStorage.setItem(TKEY, JSON.stringify(trash)); return true; }
+  catch (e) { return false; }
+}
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {} // demande au navigateur de ne pas effacer les donnees
+const warn = (msg) => app.insertAdjacentHTML("afterbegin", `<div class="fb bad" style="margin-bottom:12px"><b>Attention</b>${esc(msg)}</div>`);
 const toPool = (quiz) => quiz.questions.map((q) => ({ ...q, c: quiz.name }));
 const enc = (o) => { const b = new TextEncoder().encode(JSON.stringify(o)); let s = ""; b.forEach((x) => (s += String.fromCharCode(x))); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const dec = (t) => { const s = atob(t.replace(/-/g, "+").replace(/_/g, "/")); return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, (c) => c.charCodeAt(0)))); };
@@ -110,9 +119,10 @@ function home() {
           <button class="mini main" data-play="${i}">Jouer</button>
           <button class="mini" data-edit="${i}">Modifier</button>
           <button class="mini" data-share="${i}">Partager</button>
-          <button class="mini" data-del="${i}">Supprimer</button>
         </div></div>`).join("")}
       <button class="btn ghost" id="new">Creer un quiz</button>
+      ${trash.length ? `<h2>Quiz supprimes</h2>${trash.map((z, i) => `<div class="card row" style="align-items:center">
+        <span>${esc(z.name)}</span><button class="mini" data-restore="${i}">Restaurer</button></div>`).join("")}` : ""}
     </div>
     <div class="center"><button class="link" id="reset">Effacer ma progression</button></div>`;
   app.querySelector('[data-mode="due"]').onclick = () => start(duePool());
@@ -124,9 +134,10 @@ function home() {
   app.querySelectorAll("[data-play]").forEach((b) => (b.onclick = () => start(toPool(custom[+b.dataset.play]))));
   app.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => editor(custom[+b.dataset.edit])));
   app.querySelectorAll("[data-share]").forEach((b) => (b.onclick = () => share(custom[+b.dataset.share])));
-  app.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => {
-    const z = custom[+b.dataset.del];
-    if (confirm('Supprimer le quiz "' + z.name + '" ?')) { custom.splice(+b.dataset.del, 1); saveCustom(); home(); }
+  app.querySelectorAll("[data-restore]").forEach((b) => (b.onclick = () => {
+    custom.push(trash.splice(+b.dataset.restore, 1)[0]);
+    saveCustom();
+    home();
   }));
   app.querySelector("#reset").onclick =() => { if (confirm("Effacer toute ta progression ?")) { progress = {}; daily = {}; save(); home(); } };
 }
@@ -288,8 +299,17 @@ function drawEditor() {
     <div class="stack" style="margin-top:14px">
       <button class="btn ghost" id="add">Ajouter une question</button>
       <button class="btn" id="save">Enregistrer le quiz</button>
+      ${custom.some((z) => z.id === draft.id) ? `<button class="link" id="del">Supprimer ce quiz (tu pourras le restaurer)</button>` : ""}
     </div>`;
   app.querySelector("#cancel").onclick = home;
+  const del = app.querySelector("#del");
+  if (del) del.onclick = () => {
+    const at = custom.findIndex((z) => z.id === draft.id);
+    trash.unshift(custom.splice(at, 1)[0]);
+    trash.length = Math.min(trash.length, 20);
+    saveCustom();
+    home();
+  };
   app.querySelector("#name").oninput = (e) => (draft.name = e.target.value);
   app.querySelectorAll("[data-f]").forEach((el) => {
     el.oninput = el.onchange = () => {
@@ -322,33 +342,73 @@ function saveDraft() {
   const quiz = { id: draft.id, name, questions };
   const at = custom.findIndex((z) => z.id === quiz.id);
   if (at >= 0) custom[at] = quiz; else custom.push(quiz);
-  saveCustom();
+  if (!saveCustom()) return warn("Ce navigateur n'arrive pas a enregistrer ton quiz. Ouvre le site directement dans Chrome ou Safari.");
   home();
 }
 
 // ---- Partage par lien : le quiz est contenu dans le lien
+const SITE_URL = "https://lipop4331-svg.github.io/quiz-anglais/";
 function share(quiz) {
-  const url = location.href.split("#")[0] + "#quiz=" + enc({ id: quiz.id, name: quiz.name, questions: quiz.questions });
-  const done = () => alert("Lien copie. Envoie-le : en l'ouvrant, le quiz s'ajoute tout seul.");
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => prompt("Copie ce lien :", url));
-  else prompt("Copie ce lien :", url);
+  const base = location.protocol.startsWith("http") ? location.href.split("#")[0] : SITE_URL; // un lien vers un fichier local ne marcherait pas pour les autres
+  const url = base + "#quiz=" + enc({ id: quiz.id, name: quiz.name, questions: quiz.questions });
+  app.innerHTML = `
+    <div class="top"><button id="back">Retour</button><span>Partager</span></div>
+    <div class="card">
+      <b>${esc(quiz.name)}</b>
+      <p class="sub">Envoie ce lien. Quand ta soeur l'ouvre, le quiz s'ajoute a sa liste.</p>
+      <textarea class="in" id="link" readonly rows="5">${esc(url)}</textarea>
+      <div class="stack">
+        <button class="btn" id="copy">Copier le lien</button>
+        ${navigator.share ? `<button class="btn ghost" id="send">Envoyer...</button>` : ""}
+      </div>
+      <div id="msg" style="margin-top:12px"></div>
+      ${url.length > 6000 ? `<p class="sub">Ce lien est tres long. Si une application le coupe, partage-le en deux quiz plus courts.</p>` : ""}
+    </div>`;
+  const link = app.querySelector("#link"), msg = app.querySelector("#msg");
+  const ok = (t) => (msg.innerHTML = `<div class="fb ok">${t}</div>`);
+  app.querySelector("#back").onclick = home;
+  link.onclick = () => link.select();
+  app.querySelector("#copy").onclick = () => {
+    link.select(); link.setSelectionRange(0, url.length);
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (e) {}
+    if (copied) return ok("Lien copie. Colle-le dans un message.");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(() => ok("Lien copie. Colle-le dans un message."), () => ok("Le texte est selectionne : copie-le a la main."));
+    else ok("Le texte est selectionne : copie-le a la main.");
+  };
+  const send = app.querySelector("#send");
+  if (send) send.onclick = () => navigator.share({ title: quiz.name, url }).catch(() => {});
 }
 
+// Quand on ouvre un lien de quiz : ecran avec un bouton, rien ne se perd si le navigateur bloque les fenetres
 function importFromLink() {
   const m = location.hash.match(/^#quiz=(.+)$/);
-  if (!m) return;
-  try {
-    const z = dec(m[1]);
-    if (!validQuiz(z)) throw new Error("invalid");
-    if (confirm('Ajouter le quiz "' + z.name + '" (' + z.questions.length + " questions) a ta liste ?")) {
-      z.id = z.id || Date.now().toString(36);
-      const at = custom.findIndex((c) => c.id === z.id);
-      if (at >= 0) custom[at] = z; else custom.push(z);
-      saveCustom();
-    }
-  } catch (e) { alert("Ce lien de quiz n'est pas valide."); }
-  history.replaceState(null, "", location.pathname + location.search);
+  if (!m) return false;
+  let z = null;
+  try { z = dec(m[1]); if (!validQuiz(z)) z = null; } catch (e) { z = null; }
+  const clean = () => history.replaceState(null, "", location.pathname + location.search);
+  if (!z) {
+    app.innerHTML = `<div class="card center"><p>Ce lien de quiz n'est pas valide ou a ete coupe.</p><button class="btn" id="ok">Aller a l'accueil</button></div>`;
+    app.querySelector("#ok").onclick = () => { clean(); home(); };
+    return true;
+  }
+  app.innerHTML = `
+    <div class="card center">
+      <span class="tag">Quiz recu</span>
+      <p class="q">${esc(z.name)}</p>
+      <p class="sub">${z.questions.length} question${z.questions.length > 1 ? "s" : ""}</p>
+      <div class="stack"><button class="btn" id="add">Ajouter a mes quiz</button><button class="btn ghost" id="no">Non merci</button></div>
+    </div>`;
+  app.querySelector("#no").onclick = () => { clean(); home(); };
+  app.querySelector("#add").onclick = () => {
+    z.id = z.id || Date.now().toString(36);
+    const at = custom.findIndex((c) => c.id === z.id);
+    if (at >= 0) custom[at] = z; else custom.push(z);
+    if (!saveCustom()) return warn("Ce navigateur n'arrive pas a enregistrer le quiz. Ouvre le lien directement dans Chrome ou Safari.");
+    clean();
+    home();
+  };
+  return true;
 }
 
-importFromLink();
-home();
+if (!importFromLink()) home();
